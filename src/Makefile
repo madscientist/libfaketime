@@ -1,75 +1,98 @@
 #
 # Notes:
 #
-#   * Compilation Defines:
+#   * Variables controlling behavior.  You can set these to empty on the
+#     make command line to disable them (e.g., "make USE_CACHING="):
 #
-#     FAKE_STAT
+#     USE_FAKE_STAT
 #         - Enables time faking also for files' timestamps.
 #
-#     NO_ATFILE
-#         - Disables support for the fstatat() group of functions
+#     USE_FAKE_ATFILE
+#         - Enables time faking for the fstatat() group of functions
 #
-#     PTHREAD
-#         - Define this to enable multithreading support.
-#
-#     PTHREAD_SINGLETHREADED_TIME
-#         - Define this if you want to single-thread time() ... there ARE
-#           possibile caching side-effects in a multithreaded environment
-#           without this, but the performance impact may require you to
-#           try it unsynchronized.
-#
-#     FAKE_INTERNAL_CALLS
+#     USE_FAKE_INTERNAL_CALLS
 #         - Also intercept libc internal __functions, e.g. not just time(),
 #           but also __time(). Enhances compatibility with applications
 #           that make use of low-level system calls, such as Java Virtual
 #           Machines.
 #
-#     NO_CACHING
+#     USE_CACHING
 #         - Disables the caching of the fake time offset. Only disable caching
 #           if you change the fake time offset during program runtime very
 #           frequently. Disabling the cache may negatively influence the
 #           performance.
 #
-#     LIMITEDFAKING
-#		  - Support environment variables that limit time faking to certain
-#		    time intervals or number of function calls.
+#     USE_LIMITEDFAKING
+#         - Support environment variables that limit time faking to certain
+#           time intervals or number of function calls.
 #
-#     SPAWNSUPPORT
+#     USE_SPAWNSUPPORT
 #         - Enable support for spawning an external process at a given
 #           timestamp.
 #
-#   * Compilation addition: second libMT target added for building the pthread-
-#     enabled library as a separate library
+#     USE_PTHREAD_SINGLETHREADED_TIME
+#         - Define this if you want to single-thread time() ... there ARE
+#           possibile caching side-effects in a multithreaded environment
+#           without this, but the performance impact may require you to
+#           try it unsynchronized.
 #
-#   * Compilation switch change: previous versions compiled using '-nostartfiles'
-#     This is no longer the case since there is a 'startup' constructor for the library
-#     which is used to activate the start-at times when specified. This also initializes
-#     the dynamic disabling of the FAKE_STAT calls.
+#   * Compilation addition: second libMT target added for building the
+#     pthread-enabled library as a separate library
+#
+#   * Compilation switch change: previous versions compiled using
+#     '-nostartfiles' This is no longer the case since there is a 'startup'
+#     constructor for the library which is used to activate the start-at times
+#     when specified. This also initializes the dynamic disabling of the
+#     FAKE_STAT calls.
 #
 
+USE_CACHING= -DCACHING
+USE_FAKE_STAT = -DFAKE_STAT
+USE_FAKE_ATFILE = -DFAKE_ATFILE
+USE_FAKE_INTERNAL_CALLS = -DFAKE_INTERNAL_CALLS
+USE_POSIX_REALTIME = -DPOSIX_REALTIME
+USE_LIMITEDFAKING = -DLIMITEDFAKING
+USE_SPAWNSUPPORT = -DSPAWNSUPPORT
+USE_PTHREAD_SINGLETHREADED_TIME = -DPTHREAD_SINGLETHREADED_TIME
+
+# Where to install
+PREFIX = /usr/local
+
+# Shared library version
+SONAME = 1
+
+# Allow the user to override the default compilation flags
+CFLAGS = -O2 -g
+
+# Utilities
 CC = gcc
 INSTALL = install
 
-PREFIX = /usr/local
+# --------------------------------------------------
+# The rest of this should not be changed
 
-CFLAGS += -std=gnu99 -Wall -DFAKE_STAT -DFAKE_INTERNAL_CALLS -fPIC -DPOSIX_REALTIME -DLIMITEDFAKING -DSPAWNSUPPORT
+_CFLAGS += -std=gnu99 -Wall -fPIC
+_CPPFLAGS = $(USE_CACHING) $(USE_FAKE_ATFILE) $(USE_FAKE_STAT) $(USE_FAKE_INTERNAL_CALLS) $(USE_POSIX_REALTIME) $(USE_LIMITEDFAKING) $(USE_SPAWNSUPPORT)
+_MTFLAGS = $(USE_PTHREAD_SINGLETHREADED_TIME)
 LDFLAGS += -shared -ldl -lm -lpthread
 
 SRC = faketime.c
 OBJ = faketime.o faketimeMT.o
 
-SONAME = 1
 LIBS = libfaketime.so.${SONAME} libfaketimeMT.so.${SONAME}
+
+COMPILE.o = ${CC} ${CPPFLAGS} ${_CPPFLAGS} ${CFLAGS} ${_CFLAGS}
 
 all: ${LIBS}
 
-faketimeMT.o: EXTRA_FLAGS := -DPTHREAD -DPTHREAD_SINGLETHREADED_TIME
-
-${OBJ}: faketime.c
-	${CC} -o $@ -c ${CFLAGS} ${EXTRA_FLAGS} $<
-
 lib%.so.${SONAME}: %.o
-	${CC} -o $@ -Wl,-soname,$@ $< ${LDFLAGS}
+	${CC} -o $@ -Wl,-soname,$@ $^ ${LDFLAGS}
+
+%MT.o : %.c
+	${COMPILE.o} -DPTHREAD ${_MTFLAGS} -o $@ -c $<
+
+%.o : %.c
+	${COMPILE.o} -o $@ -c $<
 
 clean:
 	@rm -f ${OBJ} ${LIBS}
@@ -77,16 +100,19 @@ clean:
 distclean: clean
 	@echo
 
+_INST = ${DESTDIR}${PREFIX}
+
 install: ${LIBS}
 	@echo
-	@echo "Copying the faketime libraries to ${DESTDIR}${PREFIX}/lib/faketime and the faketime wrapper script to ${DESTDIR}${PREFIX}/bin ..."
-	$(INSTALL) -dm0755 "${DESTDIR}${PREFIX}/lib/faketime/"
-	$(INSTALL) -m0644 ${LIBS} "${DESTDIR}${PREFIX}/lib/faketime/"
-	$(INSTALL) -Dm0755 faketime "${DESTDIR}${PREFIX}/bin/faketime"
+	@echo "Copying the faketime libraries to ${_INST}/lib/faketime and the faketime wrapper script to ${_INST}/bin ..."
+	$(INSTALL) -dm0755 "${_INST}/lib/faketime/"
+	$(INSTALL) -m0644 ${LIBS} "${_INST}/lib/faketime/"
+	$(INSTALL) -Dm0755 faketime "${_INST}/bin/faketime"
 
 uninstall:
-	for f in ${LIBS}; do rm -f "${DESTDIR}${PREFIX}/lib/faketime/$$f"; done
-	rmdir "${DESTDIR}${PREFIX}/lib/faketime"
-	rm -f "${DESTDIR}${PREFIX}/bin/faketime"
+	for f in ${LIBS}; do rm -f "${_INST}/lib/faketime/$$f"; done
+	rmdir "${_INST}/lib/faketime"
+	rm -f "${_INST}/bin/faketime"
 
 .PHONY: all clean distclean install uninstall
+.PRECIOUS: ${OBJ} ${LIBS}

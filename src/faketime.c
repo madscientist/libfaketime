@@ -86,7 +86,7 @@ int    fake_clock_gettime(clockid_t clk_id, struct timespec *tp);
 
 #ifdef FAKE_STAT
 
-#ifndef NO_ATFILE
+#ifdef FAKE_ATFILE
 #ifndef _ATFILE_SOURCE
 #define _ATFILE_SOURCE
 #endif
@@ -167,7 +167,7 @@ int __fxstat (int ver, int fildes, struct stat *buf) {
 }
 
 /* Added in v0.8 as suggested by Daniel Kahn Gillmor */
-#ifndef NO_ATFILE
+#ifdef FAKE_ATFILE
 int __fxstatat(int ver, int fildes, const char *filename, struct stat *buf, int flag) {
   static int (*real_fstatat) (int, int, const char *, struct stat *, int);
   static int has_real_fstatat=0;
@@ -305,7 +305,7 @@ int __fxstat64 (int ver, int fildes, struct stat64 *buf) {
 }
 
 /* Added in v0.8 as suggested by Daniel Kahn Gillmor */
-#ifndef NO_ATFILE
+#ifdef FAKE_ATFILE
 int __fxstatat64 (int ver, int fildes, const char *filename, struct stat64 *buf, int flag) {
   static int (*real_fstatat64)(int, int , const char *, struct stat64 *, int);
   static int has_real_fstatat64=0;
@@ -761,7 +761,7 @@ static pthread_mutex_t time_mutex=PTHREAD_MUTEX_INITIALIZER;
         }
     }
 
-#ifdef NO_CACHING
+#ifndef CACHING
     cache_expired = 1;
 #endif
 
