@@ -12,111 +12,124 @@
 # Acknowledgment: Parts of the functionality of this wrapper have been
 # inspired by Matthias Urlichs' datefudge 1.14.
 
-# Configuration: Path where the libfaketime libraries can be found on Linux/UNIX.
-FTPL_PATH=/usr/lib/faketime
+CMD=${0##*/}
+
+die () { echo "$*"; exit 1; }
+
+version () {
+    cat <<EOF
+$CMD: Version 0.8"
+For usage information please use '$CMD --help'."
+EOF
+    exit 0
+}
+
+help () {
+    cat <<EOF
+
+Usage: $CMD [switches] timestamp program arguments
+
+This will run the specified 'program' with the given 'arguments'.
+The program will be tricked into seeing the given 'timestamp' as its starting
+date and time.  The clock will continue to run from this timestamp. Please see
+the manpage (man faketime) for advanced options, such as stopping the wall
+clock and make it run faster or slower.
+
+The optional switches are:
+  -m        : Use the multi-threaded version of libfaketime
+  -f        : Use the advanced timestamp specification format (see manpage)
+
+Examples:
+$CMD 'last friday 5 pm' /bin/date
+$CMD '2008-12-24 08:15:42' /bin/date
+$CMD -f '+2,5y x10,0' /bin/bash -c 'date; while true; do echo \$SECONDS ; sleep 1 ; done'
+$CMD -f '+2,5y x0,50' /bin/bash -c 'date; while true; do echo \$SECONDS ; sleep 1 ; done'
+(Please note that it depends on your locale settings whether . or , has to be
+used for fractions)
+
+EOF
+    exit 0
+}
+
+LIBNAME=libfaketime.so.1
 
 # For Mac OS X users: Full path and name to libfaketime.dylib.1
 MAC_FTPL_PATH=./libfaketime.dylib.1
 
-offset="$1"
-
 DATE_CMD=date
+USEDIRECT=false
 
-USEMT=0
-USEDIRECT=0
+# Parse any options
+while true; do
+    case $1 in
+        (-h|-\?|--help) help ;;
+        (-v|--version) version ;;
+        (-m) LIBNAME=libfaketimeMT.so.1 ;;
+        (-f) USEDIRECT=true ;;
+        (--) shift; break ;;
+        (*) break ;;
+    esac
+    shift
+done
 
-if [ "$offset" = "-v" -o "$offset" = "--version" ] ; then
-	echo ""
-	echo "$0: Version 0.8"
-	echo "For usage information please use '$0 --help'."
-	echo ""
-	exit 0
+# With no arguments, show the help
+[ -z "$1" ] && help
+
+# Find the faketime library
+if [ -z "$FTPL_PATH" ]; then
+    bindir=${0%/*}
+    pdir=${bindir%/*}
+    # Find the library in various places
+    for p in "$pdir"/lib/faketime "$pdir"/lib \
+             /usr/local/lib/faketime /usr/local/lib \
+             /usr/lib/faketime /usr/lib; do
+        [ -f "$p/$LIBNAME" ] || continue
+        FTPL_PATH=$p
+        break
+    done
 fi
+[ -n "$FTPL_PATH" ] || die "Failed to locate $LIBNAME"
 
-if [ "$offset" = "-m" ] ; then USEMT=1; shift; offset="$1"; fi
-if [ "$offset" = "-f" ] ; then USEDIRECT=1; shift; offset="$1"; fi
-if [ "$offset" = "-m" ] ; then USEMT=1; shift; offset="$1"; fi
+# The next argument should be the offset.
+offset=$1
+shift
 
 # Have USEDIRECT implicitly set when $offset begins with + or -, followed
 # by number and not having 3 consecutive alphabet characters.
 # This matches e.g. '-16hx2' but not '-3 weeks'.
 case $offset in
-	[+-][0-9]*[A-Za-z][A-Za-z][A-Za-z]*) ;;
-	[+-][0-9]*) USEDIRECT=1 ;;
+    ([+-][0-9]*[A-Za-z][A-Za-z][A-Za-z]*) : not direct ;;
+    ([+-][0-9]*) USEDIRECT=true ;;
 esac
 
-if [ -z "$offset" -o "$offset" = "-h" -o "$offset" = "-?" -o "$offset" = "--help" ] ; then
-	echo ""
-	echo "Usage: $0 [switches] timestamp program arguments"
-	echo ""
-	echo "This will run the specified 'program' with the given 'arguments'."
-	echo "The program will be tricked into seeing the given 'timestamp' as its starting date and time."
-	echo "The clock will continue to run from this timestamp. Please see the manpage (man faketime)"
-	echo "for advanced options, such as stopping the wall clock and make it run faster or slower."
-	echo ""
-	echo "The optional switches are:"
-	echo "  -m        : Use the multi-threaded version of libfaketime"
-	echo "  -f        : Use the advanced timestamp specification format (see manpage)"
-	echo ""
-	echo "Examples:"
-	echo "$0 'last friday 5 pm' /bin/date"
-	echo "$0 '2008-12-24 08:15:42' /bin/date"
-	echo "$0 -f '+2,5y x10,0' /bin/bash -c 'date; while true; do echo \$SECONDS ; sleep 1 ; done'"
-	echo "$0 -f '+2,5y x0,50' /bin/bash -c 'date; while true; do echo \$SECONDS ; sleep 1 ; done'"
-	echo "(Please note that it depends on your locale settings whether . or , has to be used for fractions)"
-	echo ""
-	if [ -z "$offset" ] ; then
-		exit 1;
-	fi
-	exit 0
-fi
-
-shift
-
 # Check whether we are on Mac OS X (Darwin)
-UNAME=$(uname)
-if [ "$UNAME" = "Darwin" ] ; then
-    export DYLD_FORCE_FLAT_NAMESPACE=1
-    export DYLD_INSERT_LIBRARIES=$MAC_FTPL_PATH
+if [ "$(uname)" = "Darwin" ] ; then
+    DYLD_FORCE_FLAT_NAMESPACE=1
+    DYLD_INSERT_LIBRARIES=$MAC_FTPL_PATH
+    export DYLD_FORCE_FLAT_NAMESPACE DYLD_INSERT_LIBRARIES
     DATE_CMD=gdate
-fi
-
-# Setting LD_PRELOAD ...
-if [ "$USEMT" -eq 0 ] ; then
-	export LD_PRELOAD="${LD_PRELOAD}${LD_PRELOAD:+:}$FTPL_PATH/libfaketime.so.1"
-fi
-if [ "$USEMT" -eq 1 ] ; then
-	export LD_PRELOAD="${LD_PRELOAD}${LD_PRELOAD:+:}$FTPL_PATH/libfaketimeMT.so.1"
 fi
 
 ###
 
 # Setting FAKETIME ...
+if $USEDIRECT; then
+    FAKETIME=$offset
+else
+    seconds=$($DATE_CMD -d "$offset" '+%s') \
+        || die "Error: Timestamp '$offset' not recognized, please re-try."
 
-if [ "$USEDIRECT" -eq 0 ] ; then
-	seconds=$($DATE_CMD -d "$offset" '+%s')
-	if [ $? -ne 0 ] ; then
-		echo "Error: Timestamp to fake not recognized, please re-try with a different timestamp."
-		exit 1
-	fi
+    offset=$(expr $seconds - $($DATE_CMD '+%s')) \
+        || die "Error: Cannot calculate the faketime offset in seconds, please re-try."
 
-	offset=$(expr $seconds - $($DATE_CMD '+%s'))
-	if [ $? -ne 0 ] ; then
-		echo "Error: Cannot calculate the faketime offset in seconds, please re-try with a different timestamp."
-		exit 1
-	fi
-
-	FAKETIMEPREFIX=""
-	if [ "$offset" -ge 0 ] ; then
-		FAKETIMEPREFIX="+"
-	fi
-
-	export FAKETIME="$FAKETIMEPREFIX$offset"
+    FAKETIME=$offset
+    [ "$offset" -ge 0 ] && FAKETIME="+$FAKETIME"
 fi
-if [ "$USEDIRECT" -eq 1 ] ; then
-	export FAKETIME="$offset"
-fi
+
+export FAKETIME
+
 ###
 
-# Executing the user-specified command ...
-exec "$@"
+# Executing the user-specified command with the faketime library preloaded
+
+LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$FTPL_PATH/$LIBNAME" exec "$@"
