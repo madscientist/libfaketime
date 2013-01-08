@@ -1,4 +1,5 @@
 INSTALL = install
+PREFIX = /usr/local
 
 all:
 	$(MAKE) -C src all
