@@ -23,26 +23,41 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
+#include <unistd.h>
 
 /* pthread-handling contributed by David North, TDI in version 0.7 */
 #ifdef PTHREAD
 #include <pthread.h>
 
-static pthread_mutex_t once_mutex=PTHREAD_MUTEX_INITIALIZER;
+#define FT_MUTEX_INIT(_mtx) \
+    static pthread_mutex_t _mtx = PTHREAD_MUTEX_INITIALIZER
+
+/* pthread_cleanup_push()/pthread_cleanup_pop() may be macros expanding to
+   text containing { and } respectively, so we can't use the do{}while(0)
+   trick here... be careful how you use these  */
+#define FT_MUTEX_LOCK(_mtx) \
+    pthread_mutex_lock(_mtx); \
+    pthread_cleanup_push((void (*)(void *))pthread_mutex_unlock, (void *)(_mtx))
+#define FT_MUTEX_UNLOCK() \
+    pthread_cleanup_pop(1)
+
+FT_MUTEX_INIT(once_mutex);
 
 #define SINGLE_IF_MTX(ifcondition,mtxaddr) \
   if (ifcondition) { \
-    pthread_mutex_lock(mtxaddr); \
-    pthread_cleanup_push((void (*)(void *))pthread_mutex_unlock, (void *)mtxaddr); \
+    FT_MUTEX_LOCK(mtxaddr); \
     if (ifcondition) {
 #define SINGLE_IF(ifcondition) SINGLE_IF_MTX(ifcondition,&once_mutex)
 #define END_SINGLE_IF \
     } \
-    pthread_cleanup_pop(1); \
+    FT_MUTEX_UNLOCK(); \
   }
 
 #else
 
+#define FT_MUTEX_INIT(_mtx)
+#define FT_MUTEX_LOCK(_mtx)
+#define FT_MUTEX_UNLOCK()
 #define SINGLE_IF_MTX(ifcondition,mtxaddr) if (ifcondition) {
 #define SINGLE_IF(ifcondition) if (ifcondition) {
 #define END_SINGLE_IF }
@@ -630,7 +645,7 @@ static void remove_trailing_eols(char *line)
 }
 
 
-time_t fake_time(time_t *time_tptr) {
+static time_t inner_fake_time(time_t *time_tptr) {
     static char user_faked_time[BUFFERLEN]; /* changed to static for caching in v0.6 */
     struct tm user_faked_time_tm;
     time_t user_faked_time_time_t;
@@ -671,15 +686,6 @@ time_t fake_time(time_t *time_tptr) {
 //#ifdef __APPLE__
 //    static int malloc_arena = 0;
 //#endif
-
-#ifdef PTHREAD_SINGLETHREADED_TIME
-static pthread_mutex_t time_mutex=PTHREAD_MUTEX_INITIALIZER;
-    pthread_mutex_lock(&time_mutex);
-    pthread_cleanup_push((void (*)(void *))pthread_mutex_unlock, (void *)&time_mutex);
-#endif
-
-    /* Sanity check by Karl Chan since v0.8 */
-    if (time_tptr == NULL) return -1;
 
 #ifdef LIMITEDFAKING
     /* Check whether we actually should be faking the returned timestamp. */
@@ -743,14 +749,13 @@ static pthread_mutex_t time_mutex=PTHREAD_MUTEX_INITIALIZER;
             if ((spawn_callcounter + 1) >= spawn_callcounter) spawn_callcounter++;
             if ((((*time_tptr - ftpl_starttime) == FAKETIME_SPAWN_SECONDS) || (spawn_callcounter == FAKETIME_SPAWN_NUMCALLS)) && (spawned == 0)) {
                 spawned = 1;
-                system(FAKETIME_SPAWN_TARGET);
+                (void) system(FAKETIME_SPAWN_TARGET);
             }
 
         }
 
     }
 #endif
-
 
     if (last_data_fetch > 0) {
         if ((*time_tptr - last_data_fetch) > cache_duration) {
@@ -880,12 +885,31 @@ static pthread_mutex_t time_mutex=PTHREAD_MUTEX_INITIALIZER;
         break;
     }
 
-#ifdef PTHREAD_SINGLETHREADED_TIME
-    pthread_cleanup_pop(1);
-#endif
-
     /* pass the possibly modified time back to caller */
     return *time_tptr;
+}
+
+time_t fake_time(time_t *time_tptr) {
+    time_t tmval;
+
+#ifdef PTHREAD_SINGLETHREADED_TIME
+    FT_MUTEX_INIT(time_mutex);
+#endif
+
+    /* Sanity check by Karl Chan since v0.8 */
+    if (time_tptr == NULL) return -1;
+
+#ifdef PTHREAD_SINGLETHREADED_TIME
+    FT_MUTEX_LOCK(&time_mutex);
+#endif
+
+    tmval = inner_fake_time(time_tptr);
+
+#ifdef PTHREAD_SINGLETHREADED_TIME
+    FT_MUTEX_UNLOCK();
+#endif
+
+    return tmval;
 }
 
 int fake_ftime(struct timeb *tp) {
