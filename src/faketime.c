@@ -83,6 +83,7 @@ int    fake_clock_gettime(clockid_t clk_id, struct timespec *tp);
  *  - ftime()
  *  - gettimeofday()
  *  - clock_gettime()
+ *  - pthread_cond_timedwait()
  *
  *  Since version 0.7, if FAKE_INTERNAL_CALLS is defined, also calls to
  *  __time(), __ftime(), __gettimeofday(), and __clock_gettime() will be
@@ -611,6 +612,45 @@ int clock_gettime(clockid_t clk_id, struct timespec *tp) {
 }
 #endif
 
+#ifdef FAKE_PTHREAD_COND_TIMEDWAIT
+int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
+                           const struct timespec *abstime)
+{
+    static int (*real_pthread_cond_timedwait)(pthread_cond_t *cond,
+                                              pthread_mutex_t *mutex,
+                                              const struct timespec *abstime);
+    static int has_real_pthread_cond_timedwait = 0;
+    struct timespec newtime = *abstime;
+    time_t rnow, fnow;
+
+    /* Check whether we've got a pointer to the real pthread_cond_timedwait()
+     * function yet */
+    SINGLE_IF(has_real_pthread_cond_timedwait==0)
+        real_pthread_cond_timedwait = NULL;
+        real_pthread_cond_timedwait = dlsym(RTLD_NEXT, "pthread_cond_timedwait");
+
+        /* check whether dlsym() worked */
+        if (dlerror() == NULL) {
+            has_real_pthread_cond_timedwait = 1;
+        }
+    END_SINGLE_IF
+    if (!has_real_pthread_cond_timedwait) {  /* dlsym() failed */
+#ifdef DEBUG
+        (void) fprintf(stderr, "faketime problem: original pthread_cond_timedwait() not found.\n");
+#endif
+        return -1; /* propagate error to caller */
+    }
+
+    /* Recompute the end time adjusting for the offset (adds negative times) */
+    rnow = _ftpl_time(NULL);
+    fnow = time(NULL);
+    newtime.tv_sec -= fnow - rnow;
+
+    /* return the result to the caller */
+    return (*real_pthread_cond_timedwait)(cond, mutex, &newtime);
+}
+#endif
+
 /*
  *  Static time_t to store our startup time, followed by a load-time library
  *  initialization declaration.
@@ -954,6 +994,13 @@ int __gettimeofday(struct timeval *tv, void *tz) {
 #ifdef POSIX_REALTIME
 int __clock_gettime(clockid_t clk_id, struct timespec *tp) {
     return clock_gettime(clk_id, tp);
+}
+#endif
+
+#ifdef FAKE_PTHREAD_COND_TIMEDWAIT
+int __pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
+                             const struct timespec *abstime) {
+    return pthread_cond_timedwait(cond, mutex, abstime);
 }
 #endif
 

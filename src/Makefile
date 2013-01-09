@@ -36,6 +36,13 @@
 #           without this, but the performance impact may require you to
 #           try it unsynchronized.
 #
+#     USE_FAKE_PTHREAD_COND_TIMEDWAIT
+#         - Intercept pthread_cond_timedwait().  Some implementations of glibc
+#           call the clock_gettime() system call directly, rather than using
+#           gettimeofday() or similar, when computing the timed wait.  If your
+#           implementation does this set this value to reset the timeout
+#           appropriately based on the fake time.
+#
 #   * Compilation addition: second libMT target added for building the
 #     pthread-enabled library as a separate library
 #
@@ -54,6 +61,7 @@ USE_POSIX_REALTIME = -DPOSIX_REALTIME
 USE_LIMITEDFAKING = -DLIMITEDFAKING
 USE_SPAWNSUPPORT = -DSPAWNSUPPORT
 USE_PTHREAD_SINGLETHREADED_TIME = -DPTHREAD_SINGLETHREADED_TIME
+USE_FAKE_PTHREAD_COND_TIMEDWAIT = -DFAKE_PTHREAD_COND_TIMEDWAIT
 
 # Where to install
 PREFIX = /usr/local
@@ -73,7 +81,7 @@ INSTALL = install
 
 _CFLAGS += -std=gnu99 -Wall -fPIC
 _CPPFLAGS = $(USE_CACHING) $(USE_FAKE_ATFILE) $(USE_FAKE_STAT) $(USE_FAKE_INTERNAL_CALLS) $(USE_POSIX_REALTIME) $(USE_LIMITEDFAKING) $(USE_SPAWNSUPPORT)
-_MTFLAGS = $(USE_PTHREAD_SINGLETHREADED_TIME)
+_MTFLAGS = $(USE_PTHREAD_SINGLETHREADED_TIME) $(USE_FAKE_PTHREAD_COND_TIMEDWAIT)
 LDFLAGS += -shared -ldl -lm -lpthread
 
 SRC = faketime.c
